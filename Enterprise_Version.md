@@ -2,7 +2,7 @@
 
 Retrieval-Augmented Generation (RAG) has become a critical pattern for grounding Large Language Model (LLM) responses in real-world data, improving both accuracy and reliability. Yet, conventional RAG implementations often default to vector-only databases, which come with drawbacks: weaker precision for exact facts, opaque ranking logic, and challenges with regulatory compliance.
 
-![Enterprise Hybrid RAG](./images/enterprise-deployment.png)
+![Enterprise Hybrid RAG](./images/enterprise_deployment.png)
 
 In contrast, this enterprise architecture uses a **Hybrid RAG** design that blends **BM25 lexical search** for deterministic factual grounding with **vector embeddings** for semantic context. It delivers the precision and explainability often attributed to graph-based approaches **without using a graph database**. BM25 replaces graph traversal for grounding, and vectors provide semantic context. By combining explicit term matching with semantic similarity, the system produces retrievals that are observable, reproducible, and audit-ready without sacrificing the nuance needed for ambiguous or paraphrased queries.
 

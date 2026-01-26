@@ -198,8 +198,10 @@ def ensure_vector_index(client: OpenSearch, index_name: str, dim: int) -> None:
 # File iteration
 # ---------------------------------------------------------------------------
 
+
 def iter_bbc_files(data_dir: Path):
     """Yield (category, file_path, text) for each BBC article."""
+
     for category_dir in sorted(p for p in data_dir.iterdir() if p.is_dir()):
         category = category_dir.name
         for fp in sorted(category_dir.glob("*.txt")):
@@ -381,7 +383,7 @@ def ingest_hybrid(
                 )
                 stats.bm25_chunks += 1
 
-            # paragraph chunks into vector index
+            # 2) Vector ingestion (semantic context)
             vector_text_chunks = build_vector_chunks(
                 paragraphs,
                 chunk_size=vector_chunk_size,

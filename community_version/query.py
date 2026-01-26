@@ -255,6 +255,9 @@ def run_one(
         print(f"\n[BM25_LONG_HITS] {len(bm25_long_hits)}")
         for h in bm25_long_hits[: min(10, len(bm25_long_hits))]:
             print(f"  {h.handle} score={h.score:.3f} chunk={h.chunk_index} path={h.path}")
+        # print(f"\n[GRAPH_COMBINED_HITS] {len(graph_hits)}")
+        # for h in graph_hits[: min(10, len(graph_hits))]:
+        #    print(f"  {h.handle} store={h.store} score={h.score:.3f} chunk={h.chunk_index} path={h.path}")
         print(f"\n[VEC_HITS] {len(vec_hits)} filter={'ON' if vec_anchor_paths else 'OFF'}")
         for h in vec_hits[: min(10, len(vec_hits))]:
             print(f"  {h.handle} score={h.score:.3f} chunk={h.chunk_index} path={h.path}")

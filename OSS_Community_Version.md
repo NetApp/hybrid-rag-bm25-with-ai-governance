@@ -48,7 +48,7 @@ Promotion is **explicit and outside the query path**: the retrieval code queries
 
 The sections that follow show how to **ingest** with NER enrichments (stable mappings; NER service **required by default**) plus vector embeddings, **retrieve** with entity-aware BM25 grounding and vector augmentation, and **operate LT ↔ HOT promotion workflows** (outside the query path) with optional TTL/ISM policies all with observability hooks that make auditors smile.
 
-## 2. Ingesting Your Data Into Long-Term Memory
+## 1. Ingesting Your Data Into Long-Term Memory
 
 ### Why We Start With Deterministic Indexing
 
@@ -129,7 +129,7 @@ The NER step is performed by an **external HTTP service** (spaCy by default). Fo
 
 If you want fail-soft behavior when the NER service is unavailable, add exception handling around `post_ner()` and index with empty `explicit_terms`; the reference code **currently requires** the NER service and exits on NER HTTP errors.
 
-## 3. Reinforcement & Data Promotion (HOT → Long)
+## 2. Reinforcement & Data Promotion (HOT → Long)
 
 ### Why a feedback loop matters
 
@@ -147,12 +147,6 @@ What we actually track today:
 
 If you need scores later, store them **out-of-band** (analytics DB) and keep long-term documents unchanged.
 
-
-
-
-
-
-
 ### Promotion workflow
 
 | Stage                   | Trigger                                  | Action                                                                                                                                      |
@@ -162,9 +156,6 @@ If you need scores later, store them **out-of-band** (analytics DB) and keep lon
 | **3. Evict**            | `hot_promoted_at` older than TTL         | A scheduled `delete_by_query` removes expired HOT docs.                                                                                     |
 | **4. Promote HOT → LT** | Sufficient reinforcement **or** human OK | Only then copy into LT (explicit, audited job). The reference code does **not** implement this step automatically.                          |
 | **5. Audit**            | After promotion/eviction                 | Evidence comes from reindex payloads/responses, `hot_promoted_at`, and eviction job outputs.                                                |
-
-
-
 
 ### Code cues (Python)
 
@@ -194,11 +185,11 @@ The reference workflow uses a scheduled deletion against the HOT index for items
 
 Start with entity-triggered warming and **time-based eviction**. Promotion uses **OR** over `explicit_terms` to avoid false negatives; apply your **AND** constraints at retrieval using `terms_set`. If you later add reinforcement or human approval, keep those signals **outside** the long-term index and promote to LT **only** when there's enough positive reinforcement **or** a trusted human-in-the-loop signs off.
 
-## 4. Implementation Guide
+## 3. Implementation Guide
 
 For a reference, please check out the following: [community_version/README.md](./community_version/README.md)
 
-## 5. Conclusion
+## 4. Conclusion
 
 Document-first RAG gives you more than quick answers... it gives you answers you can **defend**.
 

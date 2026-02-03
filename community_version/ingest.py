@@ -48,7 +48,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--bm25-chunk-index",
         type=str,
         default="bbc-bm25-chunks",
-        help="Paragraph-level BM25 index",
+        help="BM25 chunk index",
     )
     parser.add_argument(
         "--vec-chunk-index",
@@ -61,6 +61,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=32,
         help="Vector batch size (paragraphs)",
+    )
+    parser.add_argument(
+        "--bm25-chunking-mode",
+        choices=("fixed", "paragraph"),
+        default="fixed",
+        help="BM25 chunking strategy: fixed (sliding window) or paragraph",
+    )
+    parser.add_argument(
+        "--bm25-chunk-size",
+        type=int,
+        default=1024,
+        help="Maximum characters per BM25 chunk when using fixed chunking",
+    )
+    parser.add_argument(
+        "--bm25-chunk-overlap",
+        type=int,
+        default=256,
+        help="Character overlap between consecutive BM25 chunks when using fixed chunking",
     )
     parser.add_argument(
         "--vector-chunk-size",
@@ -100,6 +118,45 @@ def split_into_paragraphs(text: str) -> List[str]:
         paragraphs.append("\n".join(current).strip())
 
     return paragraphs or ([text.strip()] if text.strip() else [])
+
+def build_sliding_window_chunks(
+    paragraphs: Iterable[str],
+    *,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> List[str]:
+    """Create sliding-window text chunks from paragraph content.
+
+    Args:
+        paragraphs: Paragraphs from the source document. Blank entries are ignored.
+        chunk_size: Maximum size (in characters) of each chunk.
+        chunk_overlap: Number of characters to overlap between consecutive chunks.
+
+    Returns:
+        A list of chunk strings sized for the requested window.
+    """
+
+    cleaned_paragraphs = [p.strip() for p in paragraphs if p.strip()]
+    if not cleaned_paragraphs:
+        return []
+
+    combined_text = "\n\n".join(cleaned_paragraphs)
+    chunks: List[str] = []
+
+    start = 0
+    text_length = len(combined_text)
+    step = max(chunk_size - chunk_overlap, 1)
+
+    while start < text_length:
+        end = min(start + chunk_size, text_length)
+        chunk = combined_text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end == text_length:
+            break
+        start += step
+
+    return chunks
 
 
 def extract_entities(text: str) -> List[str]:
@@ -267,28 +324,42 @@ def build_vector_chunks(
     Returns:
         A list of chunk strings sized for dense embedding models.
     """
+    return build_sliding_window_chunks(
+        paragraphs,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
 
-    cleaned_paragraphs = [p.strip() for p in paragraphs if p.strip()]
-    if not cleaned_paragraphs:
-        return []
 
-    combined_text = "\n\n".join(cleaned_paragraphs)
-    chunks: List[str] = []
+def build_bm25_chunks(
+    paragraphs: Iterable[str],
+    *,
+    chunking_mode: str,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> List[str]:
+    """Create BM25 chunks using paragraph or fixed-size chunking.
 
-    start = 0
-    text_length = len(combined_text)
-    step = max(chunk_size - chunk_overlap, 1)
+    Args:
+        paragraphs: Paragraphs from the source document. Blank entries are ignored.
+        chunking_mode: "paragraph" for paragraph-based chunks or "fixed" for a
+            sliding window strategy.
+        chunk_size: Maximum size (in characters) of each chunk when using fixed mode.
+        chunk_overlap: Number of characters to overlap between consecutive chunks
+            when using fixed mode.
 
-    while start < text_length:
-        end = min(start + chunk_size, text_length)
-        chunk = combined_text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end == text_length:
-            break
-        start += step
+    Returns:
+        A list of chunk strings sized for BM25 indexing.
+    """
 
-    return chunks
+    if chunking_mode == "paragraph":
+        return [p.strip() for p in paragraphs if p.strip()]
+
+    return build_sliding_window_chunks(
+        paragraphs,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +373,9 @@ def doc_sha1(s: str) -> str:
 def ingest_hybrid(
     data_dir: Path,
     batch_size: int,
+    bm25_chunking_mode: str,
+    bm25_chunk_size: int,
+    bm25_chunk_overlap: int,
     vector_chunk_size: int,
     vector_chunk_overlap: int,
 ) -> None:
@@ -365,11 +439,17 @@ def ingest_hybrid(
 
             # paragraph chunks into BM25 chunk index
             paragraphs = split_into_paragraphs(text)
-            chunk_docs = _build_chunk_documents(
+            bm25_chunks = build_bm25_chunks(
                 paragraphs,
+                chunking_mode=bm25_chunking_mode,
+                chunk_size=bm25_chunk_size,
+                chunk_overlap=bm25_chunk_overlap,
+            )
+            chunk_docs = _build_chunk_documents(
+                bm25_chunks,
                 category=category,
                 rel_path=rel_path,
-                chunk_count=len(paragraphs),
+                chunk_count=len(bm25_chunks),
                 now_ms=now_ms,
             )
 
@@ -456,6 +536,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     ingest_hybrid(
         data_dir=data_dir,
         batch_size=args.batch_size,
+        bm25_chunking_mode=args.bm25_chunking_mode,
+        bm25_chunk_size=args.bm25_chunk_size,
+        bm25_chunk_overlap=args.bm25_chunk_overlap,
         vector_chunk_size=args.vector_chunk_size,
         vector_chunk_overlap=args.vector_chunk_overlap,
     )

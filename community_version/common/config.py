@@ -98,15 +98,15 @@ class Settings:
     # Llama.cpp
     # llama_model_path: str = "neural-chat-7b-v3-3.Q4_K_M.gguf"
     llama_model_path: str = "Qwen2.5-7B-Instruct-1M-Q5_K_M.gguf"
-    # llama_ctx: int = 32768                  # "neural-chat = 32768, Qwen = 65536/1010000
-    llama_ctx: int = 65536                  # "neural-chat = 32768, Qwen = 65536/1010000
+    # llama_ctx: int = 32768                  # "neural-chat = 32768, Qwen = 65536/101000
+    llama_ctx: int = 65536                  # "neural-chat = 32768, Qwen = 65536/101000
     llama_n_threads: int = max(1, (os.cpu_count() or 4) - 1)
     llama_n_gpu_layers: int = 20             # -1 offloads all layers when GPU backend is available
     llama_n_batch: int = 256                 # prompt processing batch
     llama_n_ubatch: Optional[int] = 256      # physical micro-batch; None to let llama.cpp choose
     llama_low_vram: bool = True              # reduce Metal VRAM usage
 
-    # LLM server (OpenAI-compatible REST endpoint)
+    # External LLM (OpenAI-compatible endpoint). Used when USE_EXTERNAL_AI=true.
     llm_server_url: str = "http://127.0.0.1:8001/v1"
     llm_server_api_key: str = "local-llm"
     llm_server_model: str = "local-llm"
@@ -139,7 +139,7 @@ def load_settings() -> Settings:
         llm_server_model=os.getenv("EXTERNAL_LLM_MODEL", Settings.external_model)
     llama_ctx=_get_int("LLAMA_CTX", Settings.llama_ctx)
     if external_ai:
-        llama_ctx=os.getenv("EXTERNAL_LLM_MAX_TOKENS", 65536)
+        llama_ctx=os.getenv("EXTERNAL_LLM_MAX_TOKENS", 131072)
 
     return Settings(
         # Vector OpenSearch
@@ -203,7 +203,7 @@ def load_settings() -> Settings:
         llama_n_ubatch=_get_int("LLAMA_N_UBATCH", Settings.llama_n_ubatch or 0) or None,
         llama_low_vram=_get_bool("LLAMA_LOW_VRAM", Settings.llama_low_vram),
 
-        # LLM server (OpenAI-compatible REST)
+        # External LLM (OpenAI-compatible endpoint)
         llm_server_url=llm_server_url,
         llm_server_api_key=llm_server_api_key,
         llm_server_model=llm_server_model,

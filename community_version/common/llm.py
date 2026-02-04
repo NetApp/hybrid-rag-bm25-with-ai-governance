@@ -277,6 +277,7 @@ def build_refine_prompt(question: str, grounded_draft: str, vec_hits: List[Retri
         "\n"
         "VECTOR CITATIONS (optional):\n"
         f"- Allowed vector citation tags: {allowed_v}\n"
+        "- After EVERY sentence that contains a factual claim, append one or more citation tags.\n"
         f"- Don't mention the word vector or vectors in the answer.\n"
         "- Only cite vector opening tag only (e.g., [V1]). Never use closing tags like [/V1] in your answer.\n"
         "\n"

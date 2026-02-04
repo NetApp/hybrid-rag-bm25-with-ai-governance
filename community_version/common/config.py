@@ -139,7 +139,7 @@ def load_settings() -> Settings:
         llm_server_model=os.getenv("EXTERNAL_LLM_MODEL", Settings.external_model)
     llama_ctx=_get_int("LLAMA_CTX", Settings.llama_ctx)
     if external_ai:
-        llama_ctx=os.getenv("EXTERNAL_LLM_MAX_TOKENS", 131072)
+        llama_ctx=os.getenv("EXTERNAL_LLM_MAX_TOKENS", 126976)
 
     return Settings(
         # Vector OpenSearch

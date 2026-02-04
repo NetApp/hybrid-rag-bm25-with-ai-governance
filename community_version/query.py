@@ -22,10 +22,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from flask import Flask, jsonify, request
 from openai import OpenAI
 
 from common.config import load_settings
@@ -81,6 +84,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p.add_argument("--temperature", type=float, default=0.0)
     p.add_argument("--top-p", type=float, default=0.9)
 
+    # Service mode
+    p.add_argument(
+        "--service",
+        action="store_true",
+        default=False,
+        help="Start an OpenAI-compatible REST service instead of running the CLI.",
+    )
+    p.add_argument("--service-host", type=str, default=None, help="Host to bind the REST service.")
+    p.add_argument("--service-port", type=int, default=None, help="Port to bind the REST service.")
+
     return p.parse_args(argv)
 
 
@@ -121,6 +134,78 @@ def _extract_citations(answer: str) -> List[str]:
         return (0 if prefix == "B" else 1, num, tag)
 
     return sorted(cites, key=_key)
+
+
+def _normalize_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Validate and normalize chat messages from a REST payload.
+
+    Args:
+        payload: Parsed JSON payload.
+    Returns:
+        Normalized list of role/content dicts.
+    Raises:
+        ValueError: When the payload is missing or malformed.
+    """
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("Expected non-empty 'messages' list.")
+    normalized: List[Dict[str, str]] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            raise ValueError("Each message must be a JSON object.")
+        role = item.get("role")
+        content = item.get("content")
+        if not isinstance(role, str) or not isinstance(content, str):
+            raise ValueError("Each message requires string 'role' and 'content'.")
+        normalized.append({"role": role, "content": content})
+    return normalized
+
+
+def _extract_prompt(messages: List[Dict[str, str]]) -> str:
+    """Extract the user prompt from a list of chat messages.
+
+    Args:
+        messages: Normalized chat messages.
+    Returns:
+        The latest user message content, or the last message if no user role exists.
+    Raises:
+        ValueError: If the message list is empty.
+    """
+    if not messages:
+        raise ValueError("No messages provided.")
+    for item in reversed(messages):
+        if item.get("role") == "user" and item.get("content"):
+            return item["content"]
+    return messages[-1]["content"]
+
+
+def _build_chat_response(*, model: str, content: str) -> Dict[str, Any]:
+    """Format a response payload to match the OpenAI chat completion schema."""
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+    }
+
+
+def _resolve_service_bindings(args: argparse.Namespace) -> Tuple[str, int]:
+    """Resolve host/port settings for the REST service."""
+    host = args.service_host or os.getenv("RAG_AGENT_HOST", "0.0.0.0")
+    port = args.service_port or int(os.getenv("RAG_AGENT_PORT", "8002"))
+    return host, port
+
+
+def _error(status: int, message: str) -> tuple[Dict[str, Any], int]:
+    """Return a JSON API error payload."""
+    return {"error": {"message": message, "type": "invalid_request_error"}}, status
 
 
 # --------------------------------------------------------------------------------------
@@ -381,8 +466,91 @@ def run_queries(
             print(f"\nSaved JSONL record to: {args.save_results}")
 
 
+def create_service_app(args: argparse.Namespace) -> Flask:
+    """Create a Flask app that serves the Hybrid RAG pipeline via OpenAI-compatible APIs."""
+    app = Flask(__name__)
+    settings = load_settings()
+
+    bm25_hot_client, _ = create_hot_client()
+    bm25_long_client, _ = create_long_client()
+    vec_client, _ = create_vector_client()
+    llm = load_llm()
+
+    @app.route("/health", methods=["GET"])
+    def health() -> tuple[Dict[str, Any], int]:
+        host, port = _resolve_service_bindings(args)
+        return jsonify(
+            {
+                "status": "ok",
+                "model": settings.llm_server_model,
+                "server": {"host": host, "port": port},
+            }
+        ), 200
+
+    @app.route("/v1/models", methods=["GET"])
+    def models() -> tuple[Dict[str, Any], int]:
+        return jsonify(
+            {
+                "object": "list",
+                "data": [
+                    {
+                        "id": settings.llm_server_model,
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": "hybrid-rag",
+                    }
+                ],
+            }
+        ), 200
+
+    @app.route("/v1/chat/completions", methods=["POST"])
+    def chat_completions() -> tuple[Dict[str, Any], int]:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return _error(400, "Expected JSON object payload.")
+        if payload.get("stream") is True:
+            return _error(400, "Streaming responses are not supported.")
+
+        try:
+            messages = _normalize_messages(payload)
+            question = _extract_prompt(messages)
+        except ValueError as exc:
+            return _error(400, str(exc))
+
+        model = str(payload.get("model") or settings.llm_server_model)
+        request_args = argparse.Namespace(**vars(args))
+        if "temperature" in payload:
+            request_args.temperature = float(payload["temperature"])
+        if "top_p" in payload:
+            request_args.top_p = float(payload["top_p"])
+
+        answer, _audit = run_one(
+            question,
+            bm25_hot_client=bm25_hot_client,
+            bm25_long_client=bm25_long_client,
+            vec_client=vec_client,
+            llm=llm,
+            args=request_args,
+        )
+
+        return jsonify(_build_chat_response(model=model, content=answer)), 200
+
+    return app
+
+
+def run_service(args: argparse.Namespace) -> None:
+    """Run the Hybrid RAG REST service."""
+    app = create_service_app(args)
+    host, port = _resolve_service_bindings(args)
+    app.run(host=host, port=port, debug=False)
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
+
+    if args.service:
+        run_service(args)
+        return
 
     questions: List[str]
     if args.question:

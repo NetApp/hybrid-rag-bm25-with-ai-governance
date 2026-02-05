@@ -275,14 +275,14 @@ def build_refine_prompt(question: str, grounded_draft: str, vec_hits: List[Retri
         "- Preserve all existing [B#] citations EXACTLY (do not delete, renumber, merge, or move them).\n"
         "- You MAY add brief non-factual clarifications (definitions, paraphrases) supported by the vector context.\n"
         "\n"
-        "VECTOR CITATIONS (optional):\n"
+        "VECTOR CITATIONS (mandatory):\n"
         f"- Allowed vector citation tags: {allowed_v}\n"
         "- After EVERY sentence that contains a factual claim, append one or more citation tags.\n"
         f"- Don't mention the word vector or vectors in the answer.\n"
         "- Only cite vector opening tag only (e.g., [V1]). Never use closing tags like [/V1] in your answer.\n"
         "\n"
-        "Output ONLY the rewritten answer text.\n"
-        "If there is conflicting evidence, disclose the conflict and data.\n"
+        "CONFLICT INFO (mandatory):\n"
+        "If there is conflicting evidence, disclose a summary of the conflict, information, and CITATIONS.\n"
     )
     user = (
         f"QUESTION:\n{question}\n\n"

@@ -1,4 +1,4 @@
-"""OpenAI-compatible REST server that fronts a local llama.cpp model."""
+"""OpenAI-compatible REST server that fronts a local GGUF or MLX model."""
 from __future__ import annotations
 
 import os
@@ -6,10 +6,9 @@ import platform
 import time
 import uuid
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, jsonify, request
-from llama_cpp import Llama
 
 from common.config import Settings, load_settings
 from common.logging import get_logger
@@ -32,14 +31,31 @@ def _resolve_gpu_layers(settings: Settings) -> int:
     return n_gpu_layers
 
 
-@lru_cache(maxsize=1)
-def _load_local_llm(settings: Optional[Settings] = None) -> Llama:
-    """Load and cache the local llama.cpp model for serving."""
-    if settings is None:
-        settings = load_settings()
+def _resolve_local_model_path(model_path: str) -> str:
+    """Resolve a local model path, defaulting relative paths under ~/models."""
 
-    model_path = os.path.expanduser(settings.llama_model_path)
-    LOGGER.info("Loading LLaMA model from %s", model_path)
+    expanded = os.path.expanduser(model_path)
+    if os.path.isabs(expanded):
+        return expanded
+    return os.path.join(os.path.expanduser("~/models"), expanded)
+
+
+@lru_cache(maxsize=1)
+def _load_local_llm() -> Any:
+    """Load and cache the configured local model for serving."""
+    settings = load_settings()
+
+    if settings.llm_runtime == "mlx":
+        return _load_local_mlx_llm(settings)
+    return _load_local_gguf_llm(settings)
+
+
+def _load_local_gguf_llm(settings: Settings) -> Any:
+    """Load and cache the local llama.cpp model for serving."""
+    from llama_cpp import Llama
+
+    model_path = _resolve_local_model_path(settings.llama_model_path)
+    LOGGER.info("Loading GGUF model from %s", model_path)
 
     n_gpu_layers = _resolve_gpu_layers(settings)
     if _is_apple_silicon() and n_gpu_layers != 0:
@@ -66,6 +82,18 @@ def _load_local_llm(settings: Optional[Settings] = None) -> Llama:
     return Llama(**kwargs)
 
 
+def _load_local_mlx_llm(settings: Settings) -> Tuple[Any, Any]:
+    """Load and cache the local MLX model and tokenizer for serving."""
+    if not _is_apple_silicon():
+        raise RuntimeError("LLM_RUNTIME=mlx is only supported on Apple Silicon.")
+
+    from mlx_lm import load
+
+    model_path = _resolve_local_model_path(settings.mlx_model_path)
+    LOGGER.info("Loading MLX model from %s", model_path)
+    return load(model_path)
+
+
 def _error(status: int, message: str) -> tuple[Dict[str, Any], int]:
     """Return a JSON API error payload."""
     return {"error": {"message": message, "type": "invalid_request_error"}}, status
@@ -86,6 +114,34 @@ def _normalize_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
             raise ValueError("Each message requires string 'role' and 'content'.")
         normalized.append({"role": role, "content": content})
     return normalized
+
+
+def _build_mlx_prompt(tokenizer: Any, messages: List[Dict[str, str]]) -> str:
+    """Render chat messages into a prompt string for MLX generation."""
+    apply_chat_template = getattr(tokenizer, "apply_chat_template", None)
+    if callable(apply_chat_template):
+        return str(
+            apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        )
+
+    prompt_lines = [f"{message['role']}: {message['content']}" for message in messages]
+    prompt_lines.append("assistant:")
+    return "\n".join(prompt_lines)
+
+
+def _count_tokens(tokenizer: Any, text: str) -> int:
+    """Best-effort token counting for usage reporting."""
+    encode = getattr(tokenizer, "encode", None)
+    if not callable(encode):
+        return 0
+    try:
+        return int(len(encode(text)))
+    except Exception:
+        return 0
 
 
 def _build_chat_response(
@@ -117,11 +173,75 @@ def _build_chat_response(
     return payload
 
 
+def _run_gguf_chat_completion(
+    settings: Settings,
+    *,
+    messages: List[Dict[str, str]],
+    temperature: float,
+    top_p: float,
+    max_tokens: int,
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """Generate a chat completion with llama.cpp."""
+    llm = _load_local_llm()
+    response = llm.create_chat_completion(
+        messages=messages,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+    )
+
+    content = ""
+    if isinstance(response, dict):
+        choices = response.get("choices") or []
+        if choices and isinstance(choices[0], dict):
+            message = choices[0].get("message") or {}
+            content = str(message.get("content") or "")
+    usage = response.get("usage") if isinstance(response, dict) else None
+    return content, usage
+
+
+def _run_mlx_chat_completion(
+    settings: Settings,
+    *,
+    messages: List[Dict[str, str]],
+    temperature: float,
+    top_p: float,
+    max_tokens: int,
+) -> Tuple[str, Dict[str, Any]]:
+    """Generate a chat completion with mlx-lm."""
+    from mlx_lm import generate
+    from mlx_lm.sample_utils import make_sampler
+
+    model, tokenizer = _load_local_llm()
+    prompt = _build_mlx_prompt(tokenizer, messages)
+    sampler = make_sampler(temp=temperature, top_p=top_p)
+    content = str(
+        generate(
+            model,
+            tokenizer,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            sampler=sampler,
+            verbose=False,
+        )
+    )
+
+    prompt_tokens = _count_tokens(tokenizer, prompt)
+    completion_tokens = _count_tokens(tokenizer, content)
+    usage = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
+    return content, usage
+
+
 def create_app() -> Flask:
     """Create the Flask app that serves OpenAI-compatible endpoints."""
     app = Flask(__name__)
+    _load_local_llm()
+
     settings = load_settings()
-    _load_local_llm(settings)
 
     @app.route("/health", methods=["GET"])
     def health() -> tuple[Dict[str, Any], int]:
@@ -129,6 +249,7 @@ def create_app() -> Flask:
             {
                 "status": "ok",
                 "model": settings.llm_server_model,
+                "runtime": settings.llm_runtime,
                 "server": {
                     "host": os.getenv("LLM_SERVER_HOST", "0.0.0.0"),
                     "port": int(os.getenv("LLM_SERVER_PORT", "8001")),
@@ -171,21 +292,23 @@ def create_app() -> Flask:
         max_tokens = int(payload.get("max_tokens", 512))
         model = str(payload.get("model") or settings.llm_server_model)
 
-        llm = _load_local_llm(settings)
-        response = llm.create_chat_completion(
-            messages=messages,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-        )
+        if settings.llm_runtime == "mlx":
+            content, usage = _run_mlx_chat_completion(
+                settings,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            )
+        else:
+            content, usage = _run_gguf_chat_completion(
+                settings,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            )
 
-        content = ""
-        if isinstance(response, dict):
-            choices = response.get("choices") or []
-            if choices and isinstance(choices[0], dict):
-                message = choices[0].get("message") or {}
-                content = str(message.get("content") or "")
-        usage = response.get("usage") if isinstance(response, dict) else None
         return jsonify(_build_chat_response(model=model, content=content, usage=usage)), 200
 
     return app

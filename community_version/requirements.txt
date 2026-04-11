@@ -1,14 +1,24 @@
 opensearch-py==3.0.0
-llama-cpp-python==0.3.8
-spacy==3.8.5
-openai==2.14.0
 
+torch==2.6.0
+numpy>=1.26.4
+tqdm>=4.66
 sentence-transformers==5.2.0
-dotenv==0.9.9
 
+pydantic>=2.7
+spacy==3.8.5
+
+# inference
+python-dotenv==1.1.1
+llama-cpp-python==0.3.8
+openai==2.30.0
 flask==3.1.2
+requests==2.32.3
 
 # external ranker
 bm25s==0.2.14
 PyStemmer==3.0.0
 jax[cpu]==0.8.0
+
+# cache
+# vllm==0.14.1

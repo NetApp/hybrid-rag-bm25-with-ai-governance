@@ -58,7 +58,7 @@ def _default_llama_n_gpu_layers() -> int:
     return Settings.llama_n_gpu_layers
 
 
-@dataclass(frozen=True)
+@dataclass
 class Settings:
     """Runtime configuration parameters for the application."""
 
@@ -95,16 +95,20 @@ class Settings:
     # Embeddings
     embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"  # use thenlper/gte-small or Qwen/Qwen3-Embedding-0.6B
 
+    # Local LLM runtime
+    llm_runtime: str = "gguf"  # supported: gguf, mlx
+
     # Llama.cpp
-    # llama_model_path: str = "neural-chat-7b-v3-3.Q4_K_M.gguf"
     llama_model_path: str = "Qwen2.5-7B-Instruct-1M-Q5_K_M.gguf"
-    # llama_ctx: int = 32768                  # "neural-chat = 32768, Qwen = 65536/101000
-    llama_ctx: int = 65536                  # "neural-chat = 32768, Qwen = 65536/101000
+    llama_ctx: int = 65536                  # Qwen = 65536/101000
     llama_n_threads: int = max(1, (os.cpu_count() or 4) - 1)
     llama_n_gpu_layers: int = 20             # -1 offloads all layers when GPU backend is available
     llama_n_batch: int = 256                 # prompt processing batch
     llama_n_ubatch: Optional[int] = 256      # physical micro-batch; None to let llama.cpp choose
     llama_low_vram: bool = True              # reduce Metal VRAM usage
+
+    # MLX local model directory. Relative paths are resolved under ~/models.
+    mlx_model_path: str = "Qwen2.5-7B-Instruct-4bit"
 
     # External LLM (OpenAI-compatible endpoint). Used when USE_EXTERNAL_AI=true.
     llm_server_url: str = "http://127.0.0.1:8001/v1"
@@ -128,18 +132,25 @@ def load_settings() -> Settings:
 
     external_ai = os.getenv("USE_EXTERNAL_AI", "false").lower() in ("1", "true", "yes", "on")
 
-    llm_server_url=os.getenv("LLM_SERVER_URL", Settings.llm_server_url)
+    llm_runtime = _get_str("LLM_RUNTIME", Settings.llm_runtime).strip().lower()
+    if llm_runtime not in {"gguf", "mlx"}:
+        llm_runtime = Settings.llm_runtime
+
+    llm_server_url = os.getenv("LLM_SERVER_URL", Settings.llm_server_url)
     if external_ai:
         llm_server_url = _get_str("EXTERNAL_LLM_URL", Settings.external_base_url)
-    llm_server_api_key=os.getenv("LLM_SERVER_API_KEY", Settings.external_base_url)
+
+    llm_server_api_key = os.getenv("LLM_SERVER_API_KEY", Settings.llm_server_api_key)
     if external_ai:
         llm_server_api_key = _get_str("EXTERNAL_LLM_API_KEY", "")
-    llm_server_model=os.getenv("LLM_SERVER_MODEL",  Settings.llm_server_model)
+
+    llm_server_model = os.getenv("LLM_SERVER_MODEL", Settings.llm_server_model)
     if external_ai:
-        llm_server_model=os.getenv("EXTERNAL_LLM_MODEL", Settings.external_model)
-    llama_ctx=_get_int("LLAMA_CTX", Settings.llama_ctx)
+        llm_server_model = os.getenv("EXTERNAL_LLM_MODEL", Settings.external_model)
+
+    llama_ctx = _get_int("LLAMA_CTX", Settings.llama_ctx)
     if external_ai:
-        llama_ctx=os.getenv("EXTERNAL_LLM_MAX_TOKENS", 126976)
+        llama_ctx = _get_int("EXTERNAL_LLM_MAX_TOKENS", 126976)
 
     return Settings(
         # Vector OpenSearch
@@ -191,6 +202,9 @@ def load_settings() -> Settings:
         # Embeddings
         embedding_model=os.getenv("EMBEDDING_MODEL", Settings.embedding_model),
 
+        # Local LLM runtime
+        llm_runtime=llm_runtime,
+
         # LLaMA
         llama_model_path=os.getenv(
             "LLAMA_MODEL_PATH",
@@ -198,10 +212,16 @@ def load_settings() -> Settings:
         ),
         llama_ctx=llama_ctx,
         llama_n_threads=_get_int("LLAMA_N_THREADS", Settings.llama_n_threads),
-    llama_n_gpu_layers=_get_int("LLAMA_N_GPU_LAYERS", _default_llama_n_gpu_layers()),
+        llama_n_gpu_layers=_get_int("LLAMA_N_GPU_LAYERS", _default_llama_n_gpu_layers()),
         llama_n_batch=_get_int("LLAMA_N_BATCH", Settings.llama_n_batch),
         llama_n_ubatch=_get_int("LLAMA_N_UBATCH", Settings.llama_n_ubatch or 0) or None,
         llama_low_vram=_get_bool("LLAMA_LOW_VRAM", Settings.llama_low_vram),
+
+        # MLX
+        mlx_model_path=os.getenv(
+            "MLX_MODEL_PATH",
+            str(Path.home() / "models" / Settings.mlx_model_path),
+        ),
 
         # External LLM (OpenAI-compatible endpoint)
         llm_server_url=llm_server_url,

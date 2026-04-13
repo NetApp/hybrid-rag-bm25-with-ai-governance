@@ -48,7 +48,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--bm25-chunk-index",
         type=str,
         default="bbc-bm25-chunks",
-        help="BM25 chunk index",
+        help="Paragraph-level BM25 index",
     )
     parser.add_argument(
         "--vec-chunk-index",
@@ -255,10 +255,8 @@ def ensure_vector_index(client: OpenSearch, index_name: str, dim: int) -> None:
 # File iteration
 # ---------------------------------------------------------------------------
 
-
 def iter_bbc_files(data_dir: Path):
     """Yield (category, file_path, text) for each BBC article."""
-
     for category_dir in sorted(p for p in data_dir.iterdir() if p.is_dir()):
         category = category_dir.name
         for fp in sorted(category_dir.glob("*.txt")):

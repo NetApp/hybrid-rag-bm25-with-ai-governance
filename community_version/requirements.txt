@@ -1,24 +1,40 @@
-opensearch-py==3.0.0
+# databases
+opensearch-py==3.1.0
 
+# Base dependencies
 torch==2.6.0
-numpy>=1.26.4
+# numpy>=1.26.4
+numpy>=2.4.2
 tqdm>=4.66
-sentence-transformers==5.2.0
 
+# intelligence
+sentence-transformers==5.2.3
+
+# bm25
 pydantic>=2.7
-spacy==3.8.5
+spacy==3.8.7
 
 # inference
 python-dotenv==1.1.1
-llama-cpp-python==0.3.8
+llama-cpp-python==0.3.20
+
+# apple support
+mlx==0.31.1
+mlx-lm==0.31.2
+mlx-metal==0.31.1
+
+# api support
 openai==2.30.0
-flask==3.1.2
+flask>=3.1.3
 requests==2.32.3
 
 # external ranker
-bm25s==0.2.14
+bm25s==0.3.0
 PyStemmer==3.0.0
 jax[cpu]==0.8.0
 
 # cache
 # vllm==0.14.1
+
+# Dev dependencies
+pytest>=9.0.2

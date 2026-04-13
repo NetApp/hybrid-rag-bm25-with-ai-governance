@@ -558,8 +558,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     else:
         # Keep default examples neutral to avoid injecting unrelated entities.
         questions = [
-            "How much did Google purchase Windsurf for?",
             "How much did OpenAI purchase Windsurf for?",
+            "How much did Google purchase Windsurf for?",
         ]
 
     run_queries(questions, args=args)
